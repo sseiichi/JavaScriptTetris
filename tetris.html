@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=utf-8>
+<title>Sample</title>
+<script type="text/javascript">
+
+// 定数
+blocksize = 20; //ブロックの辺の長さ
+
+// グローバルな初期化
+function init() {
+  elmTarget = document.getElementById('tetrisCanvas'); // ゲームを描画するキャンバス
+  ctx = elmTarget.getContext('2d'); // グラフィックコンテキスト
+  tc = new TetriCascade(); // 積みあがったテトロミノ
+  tetromino = createRandTetromino(tc); // 落下中のテトロミノ
+  tetris = new main(); // ゲーム処理クラス
+};
+
+// テトロミノベースクラス ---ここから---
+function TetrominoBase(){
+  this.blockPositions = new Array();
+  this.grid_x = 6; //テトロミノの座標
+  this.grid_y = 0;
+  this.fallspeed = 4;
+  this.fallticktime = 0;
+  this.degrees_view = 0;  //画面に表示中の回転角度
+};
+
+// 落下速度を最速に
+TetrominoBase.prototype.MaximizeFallSpeed = function(){
+  this.fallspeed=101;
+};
+// 落下速度を速める
+TetrominoBase.prototype.increaseFallSpeed = function(){
+  this.fallspeed=25;
+};
+// 落下速度を遅くする。
+TetrominoBase.prototype.decreaseFallSpeed = function(){
+  this.fallspeed=4;
+};
+
+// テトリミノ画像を描画すべきx座標を返す。
+TetrominoBase.prototype.x = function(){
+  return this.grid_x * blocksize; 
+};
+
+// テトリミノ画像を描画すべきy座標を返す。
+TetrominoBase.prototype.y = function(){
+  return this.grid_y * blocksize + blocksize*3 +(this.fallticktime/100)*blocksize; 
+};
+
+// テトロミノを回転する
+TetrominoBase.prototype.rotate = function(){
+  var destination4x4 = this.tetrifield.get4x4(this.grid_x, this.grid_y); // テトロミノ周辺の積みあがったブロックを取得
+  var i=0;
+  var nextRotation = 0;
+  for (i=0; i < this.numOfRotation -1; i++){
+    nextRotation = (this.currentRotation + 1)%this.numOfRotation;
+    var nextBlockPosition = this.get4x4(nextRotation);
+    if (this.DoesIntersect4x4(nextBlockPosition,destination4x4)==1){
+    }
+    else{
+      // 重なってなければ回転して抜ける。
+      this.currentRotation = (this.currentRotation + 1)%this.numOfRotation;
+      return;
+    }
+    // 全回転を試してだめならあきらめる。
+  }
+};
+
+// 内部でのブロックの回転角度
+TetrominoBase.prototype.degrees = function(){
+  return this.blockPositions[this.currentRotation].degrees;
+};
+
+// 指定した回転に対応するブロックの位置(4x4)
+TetrominoBase.prototype.get4x4 = function(currentRotation){
+  return this.blockPositions[currentRotation];
+};
+
+// 画像のオフセット座標x。見た目と内部でのブロック位置を一致させるため。
+TetrominoBase.prototype.imageOffsetX = function(){
+  return blocksize * (this.blockPositions[this.currentRotation].imageOffset[0]);
+};
+
+// 画像のオフセット座標y
+TetrominoBase.prototype.imageOffsetY = function(){
+  return blocksize * (this.blockPositions[this.currentRotation].imageOffset[1]);
+};
+
+// 落下中のテトロミノを描画。見た目と内部の回転角度が違っていたら５度ずつ動かして一致させていく。
+TetrominoBase.prototype.drawOnCanvas= function(){
+  ctx.save();                  //座標保存
+  if (this.degrees() - this.degrees_view > 180){
+    this.degrees_view =(this.degrees_view -5)%360;
+  }else if (this.degrees() != this.degrees_view ) {
+    this.degrees_view =(this.degrees_view +5)%360;
+  }
+  ctx.translate(this.x()+this.image.width/2,this.y()-this.image.height/2);//平行移動
+  ctx.rotate(this.degrees_view*Math.PI/180);   //回転
+  ctx.translate(-this.x()-this.image.width/2,-this.y()-this.image.height/2);//平行移動
+  ctx.drawImage(this.image, this.x()+this.imageOffsetX(), this.y()+this.imageOffsetY());//描画
+  ctx.restore();               //座標復元
+};
+
+// 4x4の行列でブロックの重なりがあるか判定する。
+TetrominoBase.prototype.DoesIntersect4x4 = function(matrixA, matrixB) {
+  var i =0;
+  var j =0;
+  for (i = 0; i < 4; i++){
+    for (j = 0; j < 4; j++){
+      if (matrixA[i][j] != 0 && matrixB[i][j] != 0){
+        return 1;
+      }
+    }
+  }
+  return 0;
+};
+
+// 自然落下処理。この関数を呼ぶたびに徐々にブロックが落下する。
+TetrominoBase.prototype.fall = function() {
+  this.fallticktime += this.fallspeed;
+  if (this.fallticktime >= 100){
+    this.fallticktime=0;
+    this.movedown();
+  }
+};
+
+// 一段落下させる。下にブロックがあったらそこでテトロミノを固定ブロックに変換する。新しいテトロミノを供給する。
+TetrominoBase.prototype.movedown = function() {
+  var destination4x4 = this.tetrifield.get4x4(this.grid_x, this.grid_y + 1);
+  var curretn4x4 = this.get4x4(this.currentRotation);
+  if (this.DoesIntersect4x4(curretn4x4,destination4x4)==1){
+    this.tetrifield.insert4x4(this.grid_x,this.grid_y,curretn4x4);
+    //ブロックを消す処理
+    this.tetrifield.eraseBlock();
+    //ゲームオーバー処理
+    if (this.tetrifield.isGameOver() == 1){
+      init();
+    }
+    tetromino = createRandTetromino(tc);
+  }else{
+    this.grid_y = this.grid_y + 1;
+  }
+};
+
+// 左に移動
+TetrominoBase.prototype.moveleft = function() {
+  var destination4x4 = this.tetrifield.get4x4(this.grid_x - 1, this.grid_y);
+  var curretn4x4 = this.get4x4(this.currentRotation);
+  if (this.DoesIntersect4x4(curretn4x4,destination4x4)==1){
+  }else{
+    this.grid_x = this.grid_x - 1;
+  }
+};
+
+// 右に移動
+TetrominoBase.prototype.moveright = function() {
+  var destination4x4 = this.tetrifield.get4x4(this.grid_x + 1, this.grid_y);
+  var curretn4x4 = this.get4x4(this.currentRotation);
+  if (this.DoesIntersect4x4(curretn4x4,destination4x4)==1){
+  }else{
+    this.grid_x = this.grid_x + 1;
+  }
+};
+// テトロミノベースクラス ---ここまで---
+
+// 7種類のテトロミノの定義 ---ここから------------------------------------------------------------------
+function TetrominoO(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [0,2,2,0],
+    [0,2,2,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,0,0,0], 
+    [0,2,2,0],
+    [0,2,2,0],
+    [0,0,0,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [0,2,2,0],
+    [0,2,2,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,0,0,0], 
+    [0,2,2,0],
+    [0,2,2,0],
+    [0,0,0,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+
+  this.image.src = "./o.png"
+};
+TetrominoO.prototype = new TetrominoBase();
+
+function TetrominoZ(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [0,3,3,0],
+    [0,0,3,3],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,0,0,0], 
+    [0,0,3,0],
+    [0,3,3,0],
+    [0,3,0,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [3,3,0,0],
+    [0,3,3,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,0,3,0], 
+    [0,3,3,0],
+    [0,3,0,0],
+    [0,0,0,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./z.png"
+};
+TetrominoZ.prototype = new TetrominoBase();
+
+function TetrominoS(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [0,4,4,0],
+    [4,4,0,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,4,0,0], 
+    [0,4,4,0],
+    [0,0,4,0],
+    [0,0,0,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [0,0,4,4],
+    [0,4,4,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,0,0,0], 
+    [0,4,0,0],
+    [0,4,4,0],
+    [0,0,4,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./s.png"
+};
+TetrominoS.prototype = new TetrominoBase();
+
+function TetrominoL(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [0,5,5,5],
+    [0,5,0,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,0,0,0], 
+    [0,5,5,0],
+    [0,0,5,0],
+    [0,0,5,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [0,0,5,0],
+    [5,5,5,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,5,0,0], 
+    [0,5,0,0],
+    [0,5,5,0],
+    [0,0,0,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./l.png"
+};
+TetrominoL.prototype = new TetrominoBase();
+
+function TetrominoJ(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [6,6,6,0],
+    [0,0,6,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,0,6,0], 
+    [0,0,6,0],
+    [0,6,6,0],
+    [0,0,0,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [0,6,0,0],
+    [0,6,6,6],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,0,0,0], 
+    [0,6,6,0],
+    [0,6,0,0],
+    [0,6,0,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./j.png"
+};
+TetrominoJ.prototype = new TetrominoBase();
+
+function TetrominoI(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [7,7,7,7],
+    [0,0,0,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,0,7,0], 
+    [0,0,7,0],
+    [0,0,7,0],
+    [0,0,7,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [7,7,7,7],
+    [0,0,0,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,1];
+
+  this.blockPosition4 =
+    [
+    [0,0,7,0], 
+    [0,0,7,0],
+    [0,0,7,0],
+    [0,0,7,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,1];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./i.png"
+
+};
+TetrominoI.prototype = new TetrominoBase();
+
+function TetrominoT(tetrifield){
+  this.tetrifield = tetrifield;
+
+  this.currentRotation=0;
+  this.numOfRotation=4;
+
+  this.blockPosition1 =
+    [
+    [0,0,0,0], 
+    [0,8,0,0],
+    [8,8,8,0],
+    [0,0,0,0]];
+  this.blockPosition1.degrees = 0;
+  this.blockPosition1.imageOffset = [0,0];
+
+  this.blockPosition2 =
+    [
+    [0,8,0,0], 
+    [0,8,8,0],
+    [0,8,0,0],
+    [0,0,0,0]] ;
+  this.blockPosition2.degrees = 90;
+  this.blockPosition2.imageOffset = [0,0];
+
+  this.blockPosition3 =
+    [
+    [0,0,0,0], 
+    [0,8,8,8],
+    [0,0,8,0],
+    [0,0,0,0]] ;
+  this.blockPosition3.degrees = 180;
+  this.blockPosition3.imageOffset = [0,0];
+
+  this.blockPosition4 =
+    [
+    [0,0,0,0], 
+    [0,0,8,0],
+    [0,8,8,0],
+    [0,0,8,0]] ;
+  this.blockPosition4.degrees = 270;
+  this.blockPosition4.imageOffset = [0,0];
+
+  this.blockPositions = new Array();
+  this.blockPositions.push(this.blockPosition1);
+  this.blockPositions.push(this.blockPosition2);
+  this.blockPositions.push(this.blockPosition3);
+  this.blockPositions.push(this.blockPosition4);
+
+  this.image = new Image();
+  this.image.src = "./t.png"
+};
+TetrominoT.prototype = new TetrominoBase();
+// 7種類のテトロミノの定義 ---ここまで------------------------------------------------------------------
+
+// 積みあがったブロックを格納するクラス ---ここから---
+function TetriCascade(){
+  this.blockPositions = 
+    [
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1], 
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], 
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], 
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]]
+
+　// ブロックの画像を読み込む
+      this.b2img = new Image();
+  this.b2img.src = "./blockyellow.png"
+    this.b3img = new Image();
+  this.b3img.src = "./blockred.png"
+    this.b4img = new Image();
+  this.b4img.src = "./blockgreen.png"
+    this.b5img = new Image();
+  this.b5img.src = "./blockgrey.png"
+    this.b6img = new Image();
+  this.b6img.src = "./blockblue.png"
+    this.b7img = new Image();
+  this.b7img.src = "./blockcyan.png"
+    this.b8img = new Image();
+  this.b8img.src = "./blockpink.png"
+};
+
+// 指定した座標から4x4の行列を抜き出す
+TetriCascade.prototype.get4x4 = function(x,y){
+  var matrix = new Array();
+  var i = 0;
+  var j = 0;
+  for (j = y; j < y+4; j++){
+    var line = new Array();
+    for (i = x; i < x+4 ; i++){
+      line.push( this.blockPositions[j][i] );
+    }
+    matrix.push(line);
+  }
+  return matrix;
+};
+
+// 指定した座標に4x4のブロックを挿入する。
+TetriCascade.prototype.insert4x4 = function(x,y,blockmatrix){
+  var i = 0;
+  var j = 0;
+  for (j = y; j < y+4; j++){
+    for (i = x; i < x+4 ; i++){
+      var element = blockmatrix[j-y][i-x];
+      if (element != 0){
+        this.blockPositions[j][i] = element;
+      }
+    }
+  }
+  return 0;
+};
+
+// ゲームオーバー判定。
+TetriCascade.prototype.isGameOver = function(){
+  var i = 1;
+  var j = 0;
+  for (j = 6; j < 9 ; j++){
+    if (this.blockPositions[i][j] > 1){
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// ブロックが横一列に並んだら消去する処理。
+TetriCascade.prototype.eraseBlock = function(){
+  var i = 0;
+  var j = 0;
+  // 消去する列を探す。
+  var eraseLines = new Array();
+  for (i = 0; i < this.blockPositions.length ; i++){
+    var counter = 0;
+    for (j = 0; j < this.blockPositions[i].length ; j++){
+      if (this.blockPositions[i][j] > 1){
+        counter ++;
+      }
+    }
+    if (counter>=10){
+      eraseLines.push(i);
+    }
+  }
+  // 該当の列を消去して新しい列を挿入する。
+  for (i=0; i < eraseLines.length; i++){
+    var line = eraseLines[i];
+    this.blockPositions.splice(line,1);
+    this.blockPositions.unshift(
+        [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1]
+        );
+  }
+};
+
+// 積みあがったブロックを描画する。
+TetriCascade.prototype.drawOnCanvas = function(){
+  var i = 0;
+  var j = 0;
+  for (i = 0; i < this.blockPositions.length ; i++){
+    for (j = 0; j < this.blockPositions[i].length ; j++){
+      if (this.blockPositions[i][j] == 1){
+        ctx.fillStyle = 'rgb(255, 255, 255)';
+        ctx.fillRect(j*blocksize, i*blocksize, blocksize, blocksize);
+      } else if (this.blockPositions[i][j] == 2){
+        ctx.drawImage(this.b2img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 3){
+        ctx.drawImage(this.b3img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 4){
+        ctx.drawImage(this.b4img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 5){
+        ctx.drawImage(this.b5img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 6){
+        ctx.drawImage(this.b6img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 7){
+        ctx.drawImage(this.b7img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 8){
+        ctx.drawImage(this.b8img, j*blocksize, i*blocksize);
+      } else if (this.blockPositions[i][j] == 0){
+        ctx.fillStyle = 'rgb(196, 196, 196)';
+        ctx.fillRect(j*blocksize, i*blocksize, blocksize, blocksize);
+      }
+    }
+  }
+};
+// 積みあがったブロックを格納するクラス ---ここまで---
+
+// テトリスのメイン処理 --ここから--
+function main() {
+
+  //定期処理
+  setInterval(function() {
+      // 積みあがったブロックの描画
+      tc.drawOnCanvas();
+      // 落下中テトロミノの描画
+      tetromino.fall();
+      // 落下中テトロミノの描画
+      tetromino.drawOnCanvas();
+      },20);
+
+};
+
+// 落下最速
+main.prototype.MaximizeFallSpeed = function(){
+  tetromino.MaximizeFallSpeed();
+};
+
+// 落下加速
+main.prototype.increaseFallSpeed = function(){
+  tetromino.increaseFallSpeed();
+};
+
+// 落下減速
+main.prototype.decreaseFallSpeed = function(){
+  tetromino.decreaseFallSpeed();
+};
+
+// 回転操作
+main.prototype.rotate = function(){
+  tetromino.rotate();
+};
+
+// 左移動操作
+main.prototype.moveleft = function(){
+  tetromino.moveleft();
+};
+
+// 右移動操作
+main.prototype.moveright = function(){
+  tetromino.moveright();
+};
+// テトリスのメイン処理 --ここまで--
+
+// ランダムにテトロミノを生成する関数
+function createRandTetromino(tetrifield) {
+  tetrominoType = Math.floor(Math.random() * 7);
+  switch (tetrominoType) {
+    case 0:
+      return new TetrominoI(tetrifield);
+      break;
+
+    case 1:
+      return new TetrominoJ(tetrifield);
+      break;
+
+    case 2:
+      return new TetrominoL(tetrifield);
+      break;
+
+    case 3:
+      return new TetrominoO(tetrifield);
+      break;
+
+    case 4:
+      return new TetrominoS(tetrifield);
+      break;
+
+    case 5:
+      return new TetrominoT(tetrifield);
+      break;
+
+    case 6:
+      return new TetrominoZ(tetrifield);
+      break;
+
+    default:
+      return new TetrominoI(tetrifield);
+      break;
+  } 
+};
+
+//キーアップイベントの処理
+function onKeyUp(keyCode,alt,ctrl,shift) {
+  if (keyCode>=0) {
+    //下
+    if (keyCode==40) {
+      tetris.decreaseFallSpeed();
+    }
+  }
+};
+
+//キーダウンイベントの処理
+function onKeyDown(keyCode,alt,ctrl,shift) {
+  if (keyCode>=0) {
+    //左
+    if (keyCode==37) {
+      tetris.moveleft();
+    }
+    //右
+    else if (keyCode==39) {
+      tetris.moveright();
+    }
+    //上
+    else if (keyCode==38) {
+      tetris.rotate();
+    }
+    //下
+    else if (keyCode==40) {
+      tetris.increaseFallSpeed();
+    }
+    //スペース
+    else if (keyCode==32) {
+      tetris.MaximizeFallSpeed();
+    }
+  }
+};
+
+</script>
+</head>
+
+<body onKeyDown ="onKeyDown(event.keyCode,event.altKey,event.ctrlKey,event.shiftKey)" 
+onKeyUp ="onKeyUp(event.keyCode,event.altKey,event.ctrlKey,event.shiftKey)"
+onload="init()">
+<canvas id="tetrisCanvas" style="border: 0px solid gray" width="320" height="460"></canvas>
+<p id="text">
+Arrow keys to move.<br>
+Space to drop fast.
+</p>
+</body>
+</html>
